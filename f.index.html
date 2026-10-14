@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Indoor Air Quality Monitor - ESP32 Console</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #3b82f6;
+            --border-color: #334155;
+            --accent-red: #ef4444;
+            --accent-green: #22c55e;
+            --accent-yellow: #eab308;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; }
+        
+        /* Secure Login Gateway */
+        #authOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.98); backdrop-filter: blur(8px);
+            display: flex; justify-content: center; align-items: center; z-index: 9999;
+        }
+        .auth-card {
+            background: var(--card-bg); border: 1px solid var(--border-color);
+            padding: 35px; border-radius: 12px; width: 340px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .auth-card h2 { margin-top: 0; color: var(--text-main); font-size: 1.25rem; }
+        .auth-input {
+            width: 100%; padding: 12px; margin: 10px 0; background: #090d16;
+            border: 1px solid var(--border-color); color: #fff; border-radius: 6px; box-sizing: border-box;
+        }
+        .auth-btn {
+            width: 100%; padding: 12px; background: var(--accent-blue); color: white;
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px;
+        }
+        .auth-btn:hover { background: #2563eb; }
+        .error-msg { color: var(--accent-red); font-size: 0.85rem; margin-top: 10px; min-height: 20px; }
+
+        /* Dashboard Main Layout */
+        #mainDashboard { display: none; max-width: 1400px; margin: 0 auto; }
+        
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 20px; }
+        .system-healthy-badge { background: rgba(34, 197, 94, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.85rem; letter-spacing: 0.5px; }
+        .logout-btn { background: transparent; border: 1px solid var(--accent-red); color: var(--accent-red); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .logout-btn:hover { background: rgba(239, 68, 68, 0.1); }
+
+        /* Top 4 Cards Grid */
+        .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
+        .metric-card { background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; border-radius: 12px; }
+        .metric-title { font-size: 0.75rem; font-weight: bold; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px; }
+        .metric-value { font-size: 2.2rem; font-weight: bold; color: var(--text-main); margin-bottom: 5px; }
+        .metric-desc { font-size: 0.8rem; color: var(--text-muted); }
+
+        /* Bottom Grid (Chart + Logs) */
+        .content-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; border-radius: 12px; }
+        
+        /* Terminal Log Box */
+        .log-container {
+            background: #090d16; border: 1px solid var(--border-color); border-radius: 8px;
+            padding: 12px; height: 320px; overflow-y: auto; font-family: 'Courier New', Courier, monospace;
+            font-size: 0.8rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;
+        }
+        .log-entry { border-left: 3px solid var(--accent-blue); padding-left: 8px; }
+        .log-alert { border-left-color: var(--accent-red); color: #fca5a5; }
+        .log-system { border-left-color: var(--accent-green); color: #86efac; }
+    </style>
+</head>
+<body>
+
+    <!-- SECURE LOGIN GATEWAY -->
+    <div id="authOverlay">
+        <div class="auth-card">
+            <h2>🔒 Secure Telemetry Gateway</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">Enter credentials to access telemetry console.</p>
+            <form id="loginForm">
+                <input type="text" id="username" class="auth-input" placeholder="Username (admin)" required>
+                <input type="password" id="password" class="auth-input" placeholder="Password (system2026)" required>
+                <button type="submit" class="auth-btn">Authorize Session</button>
+                <div id="errorMsg" class="error-msg"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <div id="mainDashboard">
+        <header>
+            <div>
+                <h1 style="margin: 0; font-size: 1.5rem;">Smart Indoor Air Quality Monitor</h1>
+                <span style="color: var(--text-muted); font-size: 0.85rem;">ESP32 / MQ-Sensor Node telemetry console</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span class="system-healthy-badge" id="systemBadge">SYSTEM HEALTHY</span>
+                <button class="logout-btn" onclick="handleLogout()">Logout</button>
+            </div>
+        </header>
+
+        <!-- TOP METRICS GRID -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-title">Air Quality Index (AQI)</div>
+                <div class="metric-value" id="aqiVal">46</div>
+                <div class="metric-desc">Calculated from MQ-135 / MQ-2 sensor array</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Toxic Gas Concentration</div>
+                <div class="metric-value" id="gasVal">130 <span style="font-size: 1rem; font-weight: normal; color: var(--text-muted);">PPM</span></div>
+                <div class="metric-desc">CO, Smoke, and VOC density</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Ventilation Fan Output</div>
+                <div class="metric-value" id="fanVal">0%</div>
+                <div class="metric-desc" id="relayStatus">Relay Status: OFF</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Endpoint Security Status</div>
+                <div class="metric-value" style="color: var(--accent-green); font-size: 1.6rem; margin-top: 8px;" id="securityState">SECURE</div>
+                <div class="metric-desc">Session Verified / Auth Gateway Active</div>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT: CHART & SYSTEM LOGS -->
+        <div class="content-grid">
+            <!-- INTERACTIVE LIVE TELEMETRY CHART -->
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 1rem;">Live Telemetry Feed (PPM vs Time)</h3>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Hazard Limit: 300 PPM</span>
+                </div>
+                <div style="height: 310px; position: relative;">
+                    <canvas id="telemetryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- SYSTEM EVENT LOGS -->
+            <div class="card">
+                <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 1rem;">System Activity & Event Logs</h3>
+                <div class="log-container" id="logBox">
+                    <div class="log-entry log-system">[SYSTEM] Controller connected to ESP32 Gateway.</div>
+                    <div class="log-entry log-system">[CALIB] MQ Sensor baseline stabilized at 100 PPM.</div>
+                    <div class="log-entry">[SECURITY] Endpoint authentication session verified.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let telemetryChart;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if (sessionStorage.getItem('auth_token') === 'verified_active') {
+                unlockDashboard();
+            }
+
+            document.getElementById('loginForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const user = document.getElementById('username').value.trim();
+                const pass = document.getElementById('password').value.trim();
+                const errorBox = document.getElementById('errorMsg');
+
+                if (user === "admin" && pass === "system2026") {
+                    sessionStorage.setItem('auth_token', 'verified_active');
+                    unlockDashboard();
+                } else {
+                    errorBox.innerText = "Access Denied: Invalid credentials.";
+                    document.getElementById('password').value = '';
+                }
+            });
+        });
+
+        function unlockDashboard() {
+            document.getElementById('authOverlay').style.display = 'none';
+            document.getElementById('mainDashboard').style.display = 'block';
+            initChart();
+            startRealTimeStream();
+        }
+
+        function handleLogout() {
+            sessionStorage.removeItem('auth_token');
+            window.location.reload();
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('telemetryChart').getContext('2d');
+            telemetryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Gas Concentration (PPM)',
+                            data: [],
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 4,
+                            pointHoverRadius: 7
+                        },
+                        {
+                            label: 'Hazard Limit (300 PPM)',
+                            data: [],
+                            borderColor: '#ef4444',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                        y: { min: 0, max: 700, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+                    },
+                    plugins: { legend: { labels: { color: '#f8fafc', boxWidth: 12 } } },
+                    onClick: function(event, elements) {
+                        const points = telemetryChart.getElementsAtEventForMode(event, 'nearest', { intersect: false }, true);
+                        if (points.length) {
+                            const datasetIndex = points[0].datasetIndex;
+                            if (datasetIndex === 0) {
+                                const index = points[0].index;
+                                const currentVal = telemetryChart.data.datasets[0].data[index];
+                                let newVal = currentVal > 300 ? 150 : 450;
+                                telemetryChart.data.datasets[0].data[index] = newVal;
+                                telemetryChart.update();
+                                updateMetrics(newVal);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateMetrics(ppm) {
+            let aqi = Math.floor(ppm / 3);
+            let fanSpeed = 0;
+            let fanStatus = "OFF";
+
+            if (ppm >= 300) {
+                fanSpeed = 100;
+                fanStatus = "ON (MAX PWM)";
+                appendLog(`[SIMULATION] Chart point clicked! PPM spiked to ${ppm}. Hardware Fallback engaged fan at 100%.`, 'log-alert');
+            } else {
+                appendLog(`[SIMULATION] Chart point clicked! PPM adjusted to ${ppm}. Ventilation normalized.`, 'log-system');
+            }
+
+            document.getElementById('aqiVal').innerText = aqi;
+            document.getElementById('gasVal').innerHTML = `${ppm} <span style="font-size: 1rem; font-weight: normal; color: var(--text-muted);">PPM</span>`;
+            document.getElementById('fanVal').innerText = fanSpeed + "%";
+            document.getElementById('relayStatus').innerText = "Relay Status: " + fanStatus;
+            
+            const badge = document.getElementById('systemBadge');
+            if (ppm > 300) {
+                badge.innerText = "HAZARD OVERRIDE";
+                badge.style.color = "#ef4444";
+                badge.style.borderColor = "#ef4444";
+                badge.style.backgroundColor = "rgba(239, 68, 68, 0.15)";
+            } else {
+                badge.innerText = "SYSTEM HEALTHY";
+                badge.style.color = "#22c55e";
+                badge.style.borderColor = "#22c55e";
+                badge.style.backgroundColor = "rgba(34, 197, 94, 0.15)";
+            }
+        }
+
+        function startRealTimeStream() {
+            setInterval(() => {
+                const now = new Date();
+                const timeString = now.toTimeString().split(' ')[0];
+
+                let ppm = Math.floor(Math.random() * (160 - 110 + 1)) + 110;
+                let aqi = Math.floor(ppm / 3);
+                let fanSpeed = 0;
+                let fanStatus = "OFF";
+
+                if (Math.random() < 0.08) {
+                    ppm = Math.floor(Math.random() * (550 - 350 + 1)) + 350;
+                    fanSpeed = 100;
+                    fanStatus = "ON (MAX PWM)";
+                    appendLog(`[ALERT] Toxic Gas Threshold Exceeded! PPM: ${ppm}. Fan activated at 100%.`, 'log-alert');
+                }
+
+                document.getElementById('aqiVal').innerText = aqi;
+                document.getElementById('gasVal').innerHTML = `${ppm} <span style="font-size: 1rem; font-weight: normal; color: var(--text-muted);">PPM</span>`;
+                document.getElementById('fanVal').innerText = fanSpeed + "%";
+                document.getElementById('relayStatus').innerText = "Relay Status: " + fanStatus;
+                
+                const badge = document.getElementById('systemBadge');
+                if (ppm > 300) {
+                    badge.innerText = "HAZARD OVERRIDE";
+                    badge.style.color = "#ef4444";
+                    badge.style.borderColor = "#ef4444";
+                    badge.style.backgroundColor = "rgba(239, 68, 68, 0.15)";
+                } else {
+                    badge.innerText = "SYSTEM HEALTHY";
+                    badge.style.color = "#22c55e";
+                    badge.style.borderColor = "#22c55e";
+                    badge.style.backgroundColor = "rgba(34, 197, 94, 0.15)";
+                }
+
+                if (telemetryChart.data.labels.length > 15) {
+                    telemetryChart.data.labels.shift();
+                    telemetryChart.data.datasets[0].data.shift();
+                    telemetryChart.data.datasets[1].data.shift();
+                }
+                telemetryChart.data.labels.push(timeString);
+                telemetryChart.data.datasets[0].data.push(ppm);
+                telemetryChart.data.datasets[1].data.push(300);
+                telemetryChart.update('none');
+
+            }, 2000);
+        }
+
+        function appendLog(message, className = '') {
+            const logBox = document.getElementById('logBox');
+            const now = new Date().toTimeString().split(' ')[0];
+            const div = document.createElement('div');
+            div.className = `log-entry ${className}`;
+            div.innerText = `[${now}] ${message}`;
+            logBox.prepend(div);
+        }
+    </script>
+</body>
+</html>
